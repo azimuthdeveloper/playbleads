@@ -65,6 +65,21 @@ export const SCENES = [
     duration: LOOP,
     camera: parkOrbit,
   },
+  {
+    // outside The Corner, State Library of Queensland's kids' space on Stanley Place: the
+    // street view of the sign and canopy from the photos, down to the bubble-and-water play,
+    // round past the bin chicken to the parent on the planter wall, up to the sign, and back.
+    name: 'The Corner',
+    world: 'corner',
+    duration: 16,
+    keys: [
+      { pos: [-42, 24, 104], look: [10, 52, -26], fov: 50 },
+      { pos: [-18, 12, 42], look: [2, 7, 2], fov: 46 },
+      { pos: [20, 16, 38], look: [-16, 12, -22], fov: 46 },
+      { pos: [-26, 38, 50], look: [9, 84, -8], fov: 42, dur: 3 },
+      { pos: [-66, 64, 98], look: [10, 32, -28], fov: 48, dur: 2.5 }, // crane back to the street view
+    ],
+  },
 ];
 
 // when each key is reached (s), plus the scene length at the end for the way back to key 0
