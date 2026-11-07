@@ -1,6 +1,8 @@
 // Records the WebGL canvas to a video file using MediaRecorder.
-export function pickMime() {
+export function pickMime({ preferMp4 = false } = {}) {
+  const mp4 = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4'];
   const types = [
+    ...(preferMp4 ? mp4 : []),
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
     'video/webm',
@@ -10,8 +12,9 @@ export function pickMime() {
   return types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
 }
 
-export function startRecording(canvas, filename, fps = 60) {
-  const mimeType = pickMime();
+export function startRecording(canvas, filename, { fps = 60, preferMp4 = false } = {}) {
+  const mimeType = pickMime({ preferMp4 });
+  if (preferMp4 && !mimeType.includes('mp4')) console.warn('This browser cannot record MP4; saving WebM (convert it before posting to Instagram).');
   const stream = canvas.captureStream(fps);
   const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 24_000_000 });
   const chunks = [];

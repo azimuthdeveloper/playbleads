@@ -6,6 +6,11 @@ import { VoxGroup, rand } from './voxel.js';
 const R = 0.25;
 const SKIN = 0xf1c27d, SKIN_SHADE = 0xd9a866, SKIN_BASE = SKIN, SKIN_SHADE_BASE = SKIN_SHADE;
 
+// For seamless loops: snap an angular frequency (rad/s) or a period (s) so it repeats a whole
+// number of times in `loop` seconds. Without a loop they pass values through unchanged.
+const loopW = (loop) => (w) => (loop ? Math.max(1, Math.round(w / ((2 * Math.PI) / loop))) * ((2 * Math.PI) / loop) : w);
+const loopP = (loop) => (p) => (loop ? loop / Math.max(1, Math.round(loop / p)) : p);
+
 const V = (name) => new VoxGroup(name, R);
 function pivot(parent, x, y, z) {
   const g = new THREE.Group();
@@ -82,7 +87,8 @@ function makeToddlerHead(L, SKIN, SKIN_SHADE) {
 // `look` is a TODDLER_LOOKS key, or an object overriding the girl look: skin, hair, tee,
 // legs, style ('pigtails' | 'tuft' | 'curly' | 'bun'), bow, mode ('clap' | 'listen' |
 // 'point' | 'block'), phase (seconds offset so a crowd doesn't move in sync).
-export function buildToddler(look = 'girl') {
+export function buildToddler(look = 'girl', { loop = 0 } = {}) {
+  const lw = loopW(loop), lp = loopP(loop);
   const L = typeof look === 'object' ? { ...TODDLER_LOOKS.girl, ...look } : TODDLER_LOOKS[look] || TODDLER_LOOKS.girl;
   const SKIN = L.skin ?? SKIN_BASE, SKIN_SHADE = shadeOf(SKIN);
   const mode = L.mode || 'clap', phase = L.phase || 0;
@@ -121,30 +127,31 @@ export function buildToddler(look = 'girl') {
     arms.push(arm);
   }
 
+  const BEAT = lp(5);
   function update(time) {
     const t = time + phase;
-    root.rotation.z = Math.sin(t * 1.3) * 0.03;
-    head.rotation.x = (L.lookUp ?? 0.22) + Math.sin(t * 2.6) * 0.03;
-    head.rotation.y = Math.sin(t * 0.7) * 0.05;
-    const beat = t % 5;
+    root.rotation.z = Math.sin(t * lw(1.3)) * 0.03;
+    head.rotation.x = (L.lookUp ?? 0.22) + Math.sin(t * lw(2.6)) * 0.03;
+    head.rotation.y = Math.sin(t * lw(0.7)) * 0.05;
+    const beat = (((t % BEAT) + BEAT) % BEAT) * (5 / BEAT); // a 5 s routine, stretched to fit the loop
     const clapping = mode === 'clap' && beat > 2.5 && beat < 3.7;
     for (const arm of arms) {
       const s = arm.userData.side;
       const lift = (a, b) => Math.sin(Math.PI * Math.min(1, Math.max(0, (beat - a) / (b - a)))) ** 0.6; // 0..1..0 bump
       if (mode === 'listen') {
-        head.rotation.z = Math.sin(t * 0.5) * 0.12; // head tilted, rapt
+        head.rotation.z = Math.sin(t * lw(0.5)) * 0.12; // head tilted, rapt
         arm.rotation.x = 0.35;
         arm.rotation.z = s * 0.1;
       } else if (mode === 'point' && s > 0) {
         const k = lift(1, 3.2); // arm shoots up at the book
         arm.rotation.x = 0.55 + k * 1.9;
-        arm.rotation.z = -k * 0.25 + Math.sin(t * 9) * k * 0.06;
+        arm.rotation.z = -k * 0.25 + Math.sin(t * lw(9)) * k * 0.06;
       } else if (mode === 'block' && s > 0) {
         const k = lift(0.5, 2.5); // holds the block up to show it off, then bangs it down
-        arm.rotation.x = 0.7 + k * 0.9 - (beat > 3 && beat < 4 ? Math.abs(Math.sin(t * 10)) * 0.35 : 0);
+        arm.rotation.x = 0.7 + k * 0.9 - (beat > 3 && beat < 4 ? Math.abs(Math.sin(t * lw(10))) * 0.35 : 0);
         arm.rotation.z = -0.25;
       } else if (clapping) {
-        const c = Math.abs(Math.sin(t * 14));
+        const c = Math.abs(Math.sin(t * lw(14)));
         arm.rotation.x = 1.25;
         arm.rotation.z = -s * (0.15 + c * 0.45);
       } else {
@@ -152,7 +159,7 @@ export function buildToddler(look = 'girl') {
         arm.rotation.z = s * 0.15;
       }
     }
-    root.position.y = clapping ? Math.abs(Math.sin(t * 7)) * 0.3 : 0;
+    root.position.y = clapping ? Math.abs(Math.sin(t * lw(7))) * 0.3 : 0;
   }
 
   return { root, update, head };
@@ -311,7 +318,8 @@ function makeParentHead(L, closed, chair, calm = false) {
 
 // pose 'couch': slumped in front of the TV. pose 'chair': sitting up at playgroup with a
 // takeaway coffee, still exhausted but happy.
-export function buildParent(look = 'tired', pose = 'couch') {
+export function buildParent(look = 'tired', pose = 'couch', { loop = 0 } = {}) {
+  const lw = loopW(loop), lp = loopP(loop);
   const L = PARENT_LOOKS[look] || PARENT_LOOKS.tired;
   const chair = pose === 'chair';
   const root = new THREE.Group(); // hip pivot
@@ -434,18 +442,19 @@ export function buildParent(look = 'tired', pose = 'couch') {
   const baseTorsoX = torso.rotation.x;
   const smooth = (e0, e1, x) => { const k = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return k * k * (3 - 2 * k); };
   const tmpV = new THREE.Vector3();
+  const SIP = lp(7), BLINK = lp(4.6), STEAM = lw(0.45 * 2 * Math.PI) / (2 * Math.PI);
   function updateChair(t) {
-    const b = Math.sin(t * 1.1);
+    const b = Math.sin(t * lw(1.1));
     torso.scale.set(1 + b * 0.012, 1 + b * 0.008, 1 + b * 0.02);
     // a long contented sip every 7 s: up, hold, down
-    const c = t % 7;
+    const c = (t % SIP) * (7 / SIP);
     const sip = smooth(4.2, 5.0, c) * (1 - smooth(6.0, 6.8, c));
     torso.rotation.x = baseTorsoX - sip * 0.04 + b * 0.006;
     shoulderRig.rotation.x = 0.1 + sip * 0.55;
     elbowRig.rotation.x = sip * 1.05;
-    head.rotation.x = -0.2 + sip * 0.12 + Math.sin(t * 0.6) * 0.03;
-    head.rotation.y = Math.sin(t * 0.33) * 0.12 * (1 - sip);
-    head.rotation.z = 0.06 + Math.sin(t * 0.45) * 0.03;
+    head.rotation.x = -0.2 + sip * 0.12 + Math.sin(t * lw(0.6)) * 0.03;
+    head.rotation.y = Math.sin(t * lw(0.33)) * 0.12 * (1 - sip);
+    head.rotation.z = 0.06 + Math.sin(t * lw(0.45)) * 0.03;
     const closed = sip > 0.6 || (c > 1.6 && c < 1.85); // eyes close for the sip (bliss) + a blink
     headOpen.visible = !closed;
     headClosed.visible = closed;
@@ -453,7 +462,7 @@ export function buildParent(look = 'tired', pose = 'couch') {
     root.updateMatrixWorld(true);
     root.worldToLocal(lidMark.getWorldPosition(tmpV));
     steam.children.forEach((m, i) => {
-      const p = (t * 0.45 + i / steam.children.length) % 1;
+      const p = (t * STEAM + i / steam.children.length) % 1;
       m.position.set(tmpV.x + Math.sin(p * 5 + i * 2) * 0.5, tmpV.y + p * 4.5, tmpV.z + Math.cos(p * 4 + i) * 0.35);
       m.scale.setScalar(0.7 + p * 1.6);
       m.material.opacity = Math.sin(Math.PI * p) * 0.45 * (1 - sip);
@@ -461,14 +470,15 @@ export function buildParent(look = 'tired', pose = 'couch') {
   }
   function update(t) {
     if (chair) return updateChair(t);
-    const b = Math.sin(t * 1.1);
+    const b = Math.sin(t * lw(1.1));
     torso.scale.set(1 + b * 0.012, 1 + b * 0.008, 1 + b * 0.025);
     torso.rotation.x = baseTorsoX - b * 0.008;
-    const sigh = Math.max(0, Math.sin((t - 4) * 0.8)) ** 8;
+    const sigh = Math.max(0, Math.sin((t - 4) * lw(0.8))) ** 8;
     torso.rotation.x -= sigh * 0.05;
-    head.rotation.x = 0.42 + sigh * 0.08 + Math.sin(t * 0.4) * 0.015;
-    head.rotation.z = 0.14 + Math.sin(t * 0.35) * 0.03;
-    const closed = t % 4.6 > 3.7 && t % 4.6 < 4.35;
+    head.rotation.x = 0.42 + sigh * 0.08 + Math.sin(t * lw(0.4)) * 0.015;
+    head.rotation.z = 0.14 + Math.sin(t * lw(0.35)) * 0.03;
+    const bl = (t % BLINK) * (4.6 / BLINK);
+    const closed = bl > 3.7 && bl < 4.35;
     headOpen.visible = !closed;
     headClosed.visible = closed;
   }
@@ -500,9 +510,13 @@ const SPREADS = [
       : v < 0.2 ? 0x2e5e3a : (Math.floor(u * 11) * 5 + Math.floor(v * 19) * 3) % 19 === 0 ? 0xffffff : 0x1c2a5a),
   ],
 ];
-const FLIP_EVERY = 5, FLIP_LEN = 0.9, FIRST_FLIP = 3.5;
+const FLIP_GAP = 5, FLIP_LEN = 0.9, FIRST_FLIP = 3.5;
 
-export function buildTeacher() {
+export function buildTeacher({ loop = 0 } = {}) {
+  const lw = loopW(loop), lp = loopP(loop);
+  // page flips: with a loop, a whole number of trips through the book, so it ends where it began
+  const FLIP_EVERY = loop ? loop / (SPREADS.length * Math.max(1, Math.round(loop / (FLIP_GAP * SPREADS.length)))) : FLIP_GAP;
+  const TALK = lp(3.3), BLINK = lp(3.9);
   const root = new THREE.Group();
   root.name = 'teacher';
   const SK = 0x9a623d, SK_SHADE = shadeOf(SK), HAIR = 0x22160f, GREY = 0x9c958e;
@@ -632,8 +646,9 @@ export function buildTeacher() {
     const local = t - FIRST_FLIP - n * FLIP_EVERY;
     return { cur: (n + 1) % SPREADS.length, k: local < FLIP_LEN ? local / FLIP_LEN : -1 }; // flip n turns to spread n+1
   }
-  function update(t) {
-    const b = Math.sin(t * 1.2);
+  function update(time) {
+    const t = loop ? ((time % loop) + loop) % loop : time;
+    const b = Math.sin(t * lw(1.2));
     torso.scale.set(1 + b * 0.01, 1 + b * 0.006, 1 + b * 0.015);
     // page turning: during a flip the next spread's right page is already underneath
     const { cur, k } = spreadAt(t);
@@ -650,18 +665,18 @@ export function buildTeacher() {
     const toFlip = FLIP_EVERY - sinceFlip;
     const reach = t < FIRST_FLIP ? Math.max(0, 1 - (FIRST_FLIP - t) / 0.6)
       : sinceFlip < FLIP_LEN ? 1 - sinceFlip / FLIP_LEN : Math.max(0, 1 - toFlip / 0.6);
-    rShoulder.rotation.x = 0.15 + reach * 0.75 + (1 - reach) * Math.max(0, Math.sin(t * 2.1)) * 0.35;
+    rShoulder.rotation.x = 0.15 + reach * 0.75 + (1 - reach) * Math.max(0, Math.sin(t * lw(2.1))) * 0.35;
     rShoulder.rotation.y = reach * 0.55;
-    rShoulder.rotation.z = (1 - reach) * Math.sin(t * 1.4) * 0.12;
-    book.position.y = 7.6 + Math.sin(t * 0.9) * 0.15;
+    rShoulder.rotation.z = (1 - reach) * Math.sin(t * lw(1.4)) * 0.12;
+    book.position.y = 7.6 + Math.sin(t * lw(0.9)) * 0.15;
     // reading aloud: glance at the book, then out to the kids
-    const glance = (Math.sin(t * 0.8) + 1) / 2;
-    head.rotation.y = 0.15 + glance * 0.45 - Math.sin(t * 0.37) * 0.3;
-    head.rotation.x = -0.12 + Math.sin(t * 1.6) * 0.04;
-    head.rotation.z = Math.sin(t * 0.7) * 0.07;
-    const syll = Math.sin(t * 13) + Math.sin(t * 7.3) * 0.6;
-    const pausing = (t % 3.3) > 2.6;
-    const blink = t % 3.9 > 3.65;
+    const glance = (Math.sin(t * lw(0.8)) + 1) / 2;
+    head.rotation.y = 0.15 + glance * 0.45 - Math.sin(t * lw(0.37)) * 0.3;
+    head.rotation.x = -0.12 + Math.sin(t * lw(1.6)) * 0.04;
+    head.rotation.z = Math.sin(t * lw(0.7)) * 0.07;
+    const syll = Math.sin(t * lw(13)) + Math.sin(t * lw(7.3)) * 0.6;
+    const pausing = (t % TALK) > TALK - 0.7;
+    const blink = t % BLINK > BLINK - 0.25;
     heads.blink.visible = blink;
     heads.talk.visible = !blink && !pausing && syll > 0.15;
     heads.quiet.visible = !blink && !heads.talk.visible;
@@ -677,10 +692,6 @@ export function buildTeacher() {
 // opts.chaser: the kid's backpack, sweat, and the odd "wait!" reach.
 // opts.lead: right hand held out for a dog lead. opts.calm: a rested face.
 const LEG = 19.8; // thigh pivot to sole
-// For seamless loops: snap an angular frequency (rad/s) or a period (s) so it repeats a whole
-// number of times in `loop` seconds. Without a loop they pass values through unchanged.
-const loopW = (loop) => (w) => (loop ? Math.max(1, Math.round(w / ((2 * Math.PI) / loop))) * ((2 * Math.PI) / loop) : w);
-const loopP = (loop) => (p) => (loop ? loop / Math.max(1, Math.round(loop / p)) : p);
 const sm = (x) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
 const bump = (x, a, b, ramp = 0.35) => sm((x - a) / ramp) * (1 - sm((x - b + ramp) / ramp)); // 0..1..0 over [a, b]
 
