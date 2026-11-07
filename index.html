@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Voxel TV Time</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #0a0a10; color: #eee; font: 14px system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    #stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 12px; }
+    #view { max-width: 100%; max-height: 100%; aspect-ratio: 16 / 9; width: auto; height: auto; box-shadow: 0 0 0 1px #222; }
+    #bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #15151f; flex-wrap: wrap; }
+    button { background: #262636; color: #eee; border: 1px solid #383850; border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+    button.active { background: #ff3fa4; border-color: #ff3fa4; color: #fff; }
+    button#record, button#recordAll { background: #b3261e; border-color: #d0453b; }
+    select { background: #262636; color: #eee; border: 1px solid #383850; border-radius: 6px; padding: 6px 8px; font: inherit; }
+    body.recording select { opacity: 0.4; pointer-events: none; }
+    #scrub { flex: 1; min-width: 160px; }
+    #time { font-variant-numeric: tabular-nums; width: 90px; }
+    #status { color: #ff8080; }
+    body.recording button { opacity: 0.4; pointer-events: none; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="stage"><canvas id="view" width="1920" height="1080"></canvas></div>
+  <div id="bar">
+    <button data-scene="0">1 · Wide</button>
+    <button data-scene="1">2 · Kid's view</button>
+    <button data-scene="2">3 · Parent</button>
+    <button data-scene="3">4 · Library</button>
+    <button data-scene="4">5 · Park chase</button>
+    <select id="parentPick" title="Parent model"></select>
+    <select id="kidPick" title="Kid model"></select>
+    <button id="play">Pause</button>
+    <input id="scrub" type="range" min="0" max="12" step="0.01" value="0" />
+    <span id="time"></span>
+    <button id="record">● Record scene</button>
+    <button id="recordAll">● Record all</button>
+    <span id="status"></span>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

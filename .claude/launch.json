@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "voxel",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": [
+        "/Users/lewiscianci/Documents/code/playbleads/serve.py"
+      ],
+      "port": 8123
+    },
+    {
+      "name": "voxel-alt",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": [
+        "/Users/lewiscianci/Documents/code/playbleads/serve.py",
+        "8124"
+      ],
+      "port": 8124
+    }
+  ]
+}
