@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LOOP } from './park.js';
 
 // Camera scripts. Each key: t (s), pos, look, fov.
 // Positions/targets are joined with Catmull-Rom curves so the move never stops
@@ -49,24 +50,17 @@ export const SCENES = [
   },
   {
     // the weekend: a tired grown-up power-walking after a kid on a bike, round and round a
-    // little planet of a park. High behind, round the side (above the trees: everything in
-    // the park streams through the side lanes), down low in front of the kid, in close on the
-    // parent's face, then pull right up and away to show it never ends.
+    // little planet of a park. A seamless loop: starts behind the parent, sweeps out to the
+    // right in a half circle to the front, dwells there, then completes the circle round the
+    // left and comes back in behind the parent, exactly where it started.
     name: 'Park chase',
     world: 'park',
-    duration: 16,
-    keys: [
-      { t: 0, pos: [0, 70, 110], look: [0, 6, -20], fov: 40 },
-      { t: 3.5, pos: [62, 76, -6], look: [0, 12, -6], fov: 42 },
-      { t: 5.5, pos: [10, 52, -108], look: [0, 14, -12], fov: 38 },
-      { t: 7.2, pos: [3, 22, -124], look: [0, 15, -8], fov: 34 },
-      { t: 10.5, pos: [3, 40, -18], look: [3, 35, 34], fov: 40 },
-      { t: 16, pos: [-4, 95, 160], look: [0, 0, -60], fov: 46 },
-    ],
+    duration: LOOP,
+    camera: parkOrbit,
   },
 ];
 
-const curves = SCENES.map((s) => ({
+const curves = SCENES.map((s) => s.keys && ({
   pos: new THREE.CatmullRomCurve3(s.keys.map((k) => new THREE.Vector3(...k.pos)), false, 'centripetal'),
   look: new THREE.CatmullRomCurve3(s.keys.map((k) => new THREE.Vector3(...k.look)), false, 'centripetal'),
 }));
@@ -76,6 +70,7 @@ const tmp = new THREE.Vector3();
 
 export function applyCamera(camera, sceneIdx, t) {
   const s = SCENES[sceneIdx];
+  if (s.camera) return s.camera(camera, t);
   const keys = s.keys;
   const te = ease(Math.min(1, Math.max(0, t / s.duration))) * s.duration;
   let i = 0;
@@ -91,5 +86,29 @@ export function applyCamera(camera, sceneIdx, t) {
   curves[sceneIdx].look.getPoint(u, tmp);
   camera.lookAt(tmp);
   camera.fov = a.fov + (b.fov - a.fov) * local;
+  camera.updateProjectionMatrix();
+}
+
+// Park chase orbit (seconds within the LOOP): hold behind, sweep right to the front, dwell,
+// sweep round the left, hold behind again. Each move eases in and out, so the camera is at
+// rest at the loop point and the end joins the start with no jump.
+// It orbits the pair (parent ~z 32, kid ~z -42). Out at the sides it rises above the trees,
+// since the whole park streams through there; front and back it sits over the path.
+function parkOrbit(camera, t) {
+  const L = LOOP;
+  const T1 = 0.08 * L, T2 = 0.38 * L, T3 = 0.58 * L, T4 = 0.88 * L; // move, dwell, move
+  const k = (a, b) => ease(Math.min(1, Math.max(0, (t - a) / (b - a))));
+  const th = Math.PI * k(T1, T2) + Math.PI * k(T3, T4); // 0 behind -> pi in front (via +x) -> 2pi
+  const dwell = k(T2 - 1, T2 + 1) * (1 - k(T3 - 1, T3 + 1)); // 0..1, eased, while out front
+  const side = Math.sin(th) ** 2;
+  const r = 92 - dwell * 8;
+  const cz = -5;
+  camera.position.set(Math.sin(th) * r, 58 + side * 40 - dwell * 24, cz + Math.cos(th) * r);
+  const w = (2 * Math.PI) / L;
+  camera.position.x += Math.sin(t * w * 5) * 0.12; // handheld drift, repeats with the loop
+  camera.position.y += Math.sin(t * w * 7) * 0.08;
+  tmp.set(0, 12 + dwell * 6, cz - 6 + dwell * 8);
+  camera.lookAt(tmp);
+  camera.fov = 42 - dwell * 4;
   camera.updateProjectionMatrix();
 }

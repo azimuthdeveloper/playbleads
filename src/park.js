@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxGroup, rand } from './voxel.js';
+import { VoxGroup, rand, setSeed } from './voxel.js';
 import { buildWalker, buildBikeKid, buildDog, buildToddler } from './characters.js';
 
 // The never-ending chase. The park is a small voxel planet (radius PR) that rolls under a
@@ -11,8 +11,16 @@ import { buildWalker, buildBikeKid, buildDog, buildToddler } from './characters.
 //   |x| < 7 path · 7..17 runner lanes (dogs, dog walker) · 17+ benches, lamps, bins · 26+ play
 //   equipment, trees · 48+ edge trees.
 export const PR = 400; // big enough that the curve is gentle, small enough that you see it
-export const SPEED = 30; // ground speed (units/s), a brisk walk
 const CIRC = 2 * Math.PI * PR;
+// Seamless loop: the park repeats four times round the planet, and the planet turns exactly
+// one repeat (a quarter turn) per LOOP, so the last frame runs straight into the first.
+// Every animation in the scene repeats a whole number of times per LOOP too.
+export const LOOP = 20;
+const REPEATS = 4;
+const SECTOR = CIRC / REPEATS;
+export const SPEED = SECTOR / LOOP; // ground speed (units/s), ~31: a brisk walk
+const W = (2 * Math.PI) / LOOP;
+const LW = (w) => Math.max(1, Math.round(w / W)) * W; // snap an angular frequency to the loop
 const HALF = 60; // half-width of the voxel strip
 const PATH = 7;
 
@@ -24,49 +32,41 @@ const sm = (x) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2
 const shade = (c, k) => new THREE.Color(c).multiplyScalar(k).getHex();
 const sideYaw = (x) => (x < 0 ? -Math.PI / 2 : Math.PI / 2); // turn a -z-facing prop to face the path
 
-// ------------------------------------------------------------------ layout
-const LAYOUT = [
-  { u: -70, x: 32, kind: 'tree' },
-  { u: 40, x: -21, kind: 'bench', pigeons: 2 }, { u: 60, x: -19, kind: 'bin' },
-  { u: 100, x: 31, kind: 'tree' }, { u: 92, x: 21, kind: 'dogSit' },
-  { u: 150, x: -17.5, kind: 'lamp' },
-  { u: 215, x: -35, kind: 'swings' },
-  { u: 262, x: 22, kind: 'bush' }, { u: 280, x: 24, kind: 'flowers' },
-  { u: 300, x: 17.5, kind: 'lamp' },
-  { u: 345, x: 32, kind: 'slide' },
+// ------------------------------------------------------------------ layout (one repeat, u in 0..SECTOR)
+const BASE = [
+  { u: 40, x: -22, kind: 'bench', pigeons: 2 }, { u: 64, x: -22, kind: 'bin' },
+  { u: 40, x: -33, kind: 'seesaw' },
+  { u: 100, x: 32, kind: 'tree' }, { u: 92, x: 22.5, kind: 'dogSit' },
+  { u: 140, x: -33, kind: 'tree' },
+  { u: 160, x: -20.5, kind: 'lamp' },
+  { u: 225, x: -35, kind: 'swings' },
+  { u: 262, x: 24, kind: 'bush' }, { u: 285, x: 25, kind: 'flowers' },
+  { u: 300, x: 20.5, kind: 'lamp' },
+  { u: 330, x: -32, kind: 'tree' },
+  { u: 355, x: 32, kind: 'slide' },
+  { u: 420, x: 34, kind: 'tree' },
   { u: 440, x: -31, kind: 'pond' },
-  { u: 450, x: 21, kind: 'bench', pigeons: 1 },
-  { u: 520, x: 29, kind: 'picnic' }, { u: 545, x: 19.5, kind: 'ball' },
-  { u: 575, x: -31, kind: 'tree' }, { u: 610, x: 33, kind: 'blossom' },
-  { u: 665, x: -29, kind: 'seesaw' },
-  { u: 710, x: -17.5, kind: 'lamp' }, { u: 718, x: 19, kind: 'bin' },
-  { u: 780, x: -21, kind: 'bench' }, { u: 795, x: 32, kind: 'tree' },
+  { u: 465, x: 22, kind: 'bench', pigeons: 1 },
+  { u: 520, x: -24, kind: 'bush' }, { u: 545, x: -20.5, kind: 'lamp' },
+  { u: 525, x: 30, kind: 'picnic' }, { u: 552, x: 21, kind: 'ball' },
+  { u: 590, x: -32, kind: 'blossom' }, { u: 605, x: 33, kind: 'tree' },
 ];
-{
-  // the rest of the loop, so it keeps going however long you watch
-  const cycle = ['swings', 'tree', 'bench', 'lamp', 'slide', 'bush', 'pond', 'blossom', 'seesaw', 'picnic', 'lamp', 'tree', 'flowers', 'bin'];
-  const X = { swings: 35, slide: 32, pond: 31, seesaw: 29, picnic: 29, bench: 21, lamp: 17.5, bin: 19, tree: 32, blossom: 33, bush: 22, flowers: 24 };
-  let u = 870, i = 0;
-  while (u < CIRC - 160) {
-    const kind = cycle[i % cycle.length], side = i % 3 === 1 ? 1 : -1;
-    LAYOUT.push({ u, x: side * X[kind], kind });
-    u += 55 + rand() * 45;
-    i++;
-  }
-  // edge trees, wherever the big things aren't
-  for (let k = 0, e = 0; e < CIRC; e += 30 + rand() * 18, k++) {
-    const side = k % 2 ? 1 : -1;
-    const busy = LAYOUT.some((f) => ['swings', 'slide', 'pond', 'picnic'].includes(f.kind) && Math.sign(f.x) === side && Math.abs(wrapU(f.u - e)) < 40);
-    if (!busy) LAYOUT.push({ u: e, x: side * (50 + rand() * 6), kind: 'edgeTree' });
-  }
+// edge trees, wherever the big things aren't
+for (let k = 0, e = 0; e < SECTOR - 20; e += 30 + rand() * 18, k++) {
+  const side = k % 2 ? 1 : -1;
+  const busy = BASE.some((f) => ['swings', 'slide', 'pond', 'picnic'].includes(f.kind) && Math.sign(f.x) === side && Math.abs(wrapU(f.u - e)) < 40);
+  if (!busy) BASE.push({ u: e, x: side * (50 + rand() * 6), kind: 'edgeTree' });
 }
+BASE.forEach((f, i) => { f.seed = 1000 + i * 7919; f.rnd = [rand(), rand(), rand()]; }); // same every repeat
+const LAYOUT = [];
+for (let n = 0; n < REPEATS; n++) for (const f of BASE) LAYOUT.push({ ...f, u: f.u + n * SECTOR });
 
 // ground patches under things
 const ZONES = [];
 for (const f of LAYOUT) {
   if (f.kind === 'swings') ZONES.push({ u: f.u, x: f.x, ru: 18, rx: 16, kind: 'bark' });
   if (f.kind === 'seesaw') ZONES.push({ u: f.u, x: f.x, ru: 26, rx: 8, kind: 'bark' });
-  if (f.kind === 'slide') ZONES.push({ u: f.u - 10, x: f.x, ru: 32, rx: 11, kind: 'sand' });
+  if (f.kind === 'slide') ZONES.push({ u: f.u + 12, x: f.x, ru: 32, rx: 11, kind: 'sand' });
   if (f.kind === 'flowers') ZONES.push({ u: f.u, x: f.x, ru: 12, rx: 5, kind: 'flowers' });
   if (f.kind === 'pond') ZONES.push({ u: f.u, x: f.x, ru: 30, rx: 13, kind: 'water', level: terr(f.x) - 1 });
 }
@@ -91,11 +91,18 @@ function zoneAt(u, xc) {
 }
 
 // ------------------------------------------------------------------ ground
+// The strip is built from rows of voxels laid tangent to the planet: LCH rows per chunk,
+// NCH chunks all the way round (a multiple of REPEATS so every repeat lines up exactly).
+const LCH = 3, NCH = REPEATS * Math.round(SECTOR / LCH), ROWS = NCH * LCH, ROWS_PER = ROWS / REPEATS;
+const ROW = CIRC / ROWS; // arc length of one row (~1)
 const SOIL = 0x6e5236;
 const GRASS = [0x6fb84a, 0x63aa41];
 const FLOWER = [0xff5f8a, 0xffd23f, 0xffffff, 0xa64dff, 0xff8a3c];
-function surface(u, x) {
-  const xc = x + 0.5, h = hash(u, x), base = terr(xc);
+// row = row index round the planet, x = column
+function surface(row, x) {
+  const r = ((row % ROWS_PER) + ROWS_PER) % ROWS_PER; // position within the repeat
+  const u = (r + 0.5) * ROW;
+  const xc = x + 0.5, h = hash(r, x), base = terr(xc);
   const Z = zoneAt(u, xc);
   if (Z) {
     const { z, e } = Z;
@@ -110,11 +117,11 @@ function surface(u, x) {
   const ax = Math.abs(xc);
   if (ax < PATH) {
     if (ax > PATH - 1) return { c: 0xaaa293, top: base };                    // kerb
-    const joint = ((u % 8) + 8) % 8 === 0;
+    const joint = r % 8 === 0;
     if (h < 0.004) return { c: 0xd9822b, top: base };                         // a fallen leaf
     return { c: joint ? 0xb9b2a4 : h < 0.5 ? 0xd3ccbe : 0xcbc4b5, top: base };
   }
-  let c = GRASS[Math.floor(((u % 1e5) + 1e5) / 12) % 2];                     // mower stripes
+  let c = GRASS[Math.floor(r / 12) % 2];                                      // mower stripes
   if (h < 0.12) c = shade(c, 0.9);
   let tuft = 0;
   if (h > 0.965 || (ax < PATH + 1.2 && h > 0.6)) tuft = h > 0.985 ? 0x82c95a : 0x58a03a;
@@ -124,36 +131,37 @@ function surface(u, x) {
 }
 
 function buildGround(planet) {
-  const LCH = 3, NCH = Math.round(CIRC / LCH), SECTORS = 36, per = Math.ceil(NCH / SECTORS);
+  const SECTORS = 36, per = Math.ceil(NCH / SECTORS);
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   const m = new THREE.Matrix4(), col = new THREE.Color();
-  const topAt = (u, x) => (x < -HALF || x >= HALF ? -999 : surface(u, x).top);
+  const topAt = (row, x) => (x < -HALF || x >= HALF ? -999 : surface(row, x).top);
   for (let s0 = 0; s0 < NCH; s0 += per) {
     const cells = [];
     for (let i = s0; i < Math.min(NCH, s0 + per); i++) {
       const rot = new THREE.Matrix4().makeRotationX(-((i + 0.5) * 2 * Math.PI) / NCH);
       for (let k = 0; k < LCH; k++) {
-        const u = i * LCH + k, zc = LCH / 2 - k - 0.5;
+        const row = i * LCH + k, zc = (LCH / 2 - k - 0.5) * ROW;
         for (let x = -HALF; x < HALF; x++) {
-          const S = surface(u, x), top = S.top;
-          let lo = Math.min(top - 1, topAt(u, x - 1), topAt(u, x + 1), topAt(u - 1, x), topAt(u + 1, x));
+          const S = surface(row, x), top = S.top;
+          let lo = Math.min(top - 1, topAt(row, x - 1), topAt(row, x + 1), topAt(row - 1, x), topAt(row + 1, x));
           if (lo < top - 4) lo = top - 4; // strip edge: a few layers of soil
           for (let y = lo; y <= top - 1; y++) {
             const c = y === top - 1 ? S.c : y === top - 2 ? shade(S.c, 0.82) : SOIL;
-            cells.push(rot, x + 0.5, PR + y + 0.5, zc, c);
+            cells.push(rot, x + 0.5, PR + y + 0.5, zc, c, row % ROWS_PER, x * 31 + y);
           }
-          if (S.tuft) cells.push(rot, x + 0.5, PR + top + 0.5, zc, S.tuft);
+          if (S.tuft) cells.push(rot, x + 0.5, PR + top + 0.5, zc, S.tuft, row % ROWS_PER, x * 31 + top + 7);
         }
       }
     }
-    const n = cells.length / 5;
+    const n = cells.length / 7;
     const mesh = new THREE.InstancedMesh(geo, mat, n);
     for (let j = 0; j < n; j++) {
-      const o = j * 5, c = cells[o + 4];
+      const o = j * 7;
       m.makeTranslation(cells[o + 1], cells[o + 2], cells[o + 3]).premultiply(cells[o]);
       mesh.setMatrixAt(j, m);
-      mesh.setColorAt(j, col.set(c).multiplyScalar(1 + (rand() * 2 - 1) * 0.045));
+      const jit = hash(cells[o + 5] * 0.37 + 11.3, cells[o + 6] * 0.71 + 5.1); // same in every repeat
+      mesh.setColorAt(j, col.set(cells[o + 4]).multiplyScalar(1 + (jit * 2 - 1) * 0.045));
     }
     mesh.receiveShadow = true;
     mesh.castShadow = false;
@@ -247,7 +255,7 @@ function pigeon(phase = 0) {
   return {
     root,
     update(t) {
-      const k = (t + phase) % 1.6;
+      const k = (t + phase) % (LOOP / 12);
       head.position.z = -1.0 - (k < 0.5 ? Math.sin(k * Math.PI * 2) * 0.35 : 0); // head bob
       head.rotation.x = k > 0.9 && k < 1.2 ? 0.7 : 0;                          // peck
     },
@@ -300,7 +308,7 @@ function swings() {
     p.add(s);
     let k;
     if (kid) {
-      k = buildToddler({ skin: 0xc68642, hair: 0x1a1210, tee: [0xffd23f, 0xff7a5c], legs: [0x3f7fd6, 0x3a76c4], style: 'curly', mode: 'listen', lookUp: 0.05, brows: 0x1a1210 });
+      k = loopRig(buildToddler({ skin: 0xc68642, hair: 0x1a1210, tee: [0xffd23f, 0xff7a5c], legs: [0x3f7fd6, 0x3a76c4], style: 'curly', mode: 'listen', lookUp: 0.05, brows: 0x1a1210 }));
       const seat = new THREE.Group(); // the toddler rig owns its root's y, so sit it in a holder
       seat.position.set(0, -28.6, 0);
       seat.rotation.y = -Math.PI / 2; // faces the way the swing goes
@@ -315,7 +323,7 @@ function swings() {
     obj: g,
     update(t) {
       for (const { p, k, amp, ph } of seats) {
-        p.rotation.z = Math.sin(t * 2.3 + ph) * amp;
+        p.rotation.z = Math.sin(t * LW(2.3) + ph) * amp;
         k?.update(t);
       }
     },
@@ -363,7 +371,7 @@ function seesaw() {
     { z: 18, yaw: 0, look: { skin: 0xffdbac, hair: 0xe0b860, tee: [0xff8fc8, 0xffffff], legs: [0x8fd3ff, 0x84c6ef], style: 'bun', bow: 0xff3fa4, mode: 'clap', brows: 0xc49a4a, lookUp: 0 } },
     { z: -18, yaw: Math.PI, look: { skin: 0x6e4019, hair: 0x120c0a, tee: [0xf28c28], legs: [0x2f2f3a, 0x29293a], style: 'tuft', mode: 'clap', phase: 2.5, brows: 0x120c0a, lookUp: 0 } },
   ].map(({ z, yaw, look }) => {
-    const k = buildToddler(look);
+    const k = loopRig(buildToddler(look));
     const seat = new THREE.Group();
     seat.position.set(0, 1, z);
     seat.rotation.y = yaw;
@@ -376,7 +384,7 @@ function seesaw() {
   return {
     obj: g,
     update(t) {
-      p.rotation.x = Math.sin(t * 1.6) * 0.2;
+      p.rotation.x = Math.sin(t * LW(1.6)) * 0.2;
       kids.forEach((k) => k.update(t));
     },
   };
@@ -411,8 +419,8 @@ function pond(level, side) {
     obj: g,
     update(t) {
       ducks.forEach((d, i) => {
-        const a = t * (0.18 + i * 0.05) + i * 2.1;
-        d.position.set(Math.sin(a) * (5 + i * 1.5), level + Math.sin(t * 2 + i) * 0.12, Math.cos(a) * (14 + i * 3));
+        const a = t * W * (i === 1 ? -1 : 1) + i * 2.1; // one lap of the pond per loop
+        d.position.set(Math.sin(a) * (5 + i * 1.5), level + Math.sin(t * LW(2) + i) * 0.12, Math.cos(a) * (14 + i * 3));
         d.rotation.y = a + Math.PI / 2 + Math.PI;
         d.rotation.z = Math.sin(t * 2.4 + i) * 0.06;
       });
@@ -478,11 +486,13 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
   };
   for (const f of LAYOUT) {
     const yaw = sideYaw(f.x);
+    setSeed(f.seed); // every repeat of a prop gets built voxel-for-voxel the same
+    const [r0, r1, r2] = f.rnd;
     let made;
     switch (f.kind) {
-      case 'tree': made = tree({ h: 24 + rand() * 8, r: 11 + rand() * 3 }); break;
+      case 'tree': made = tree({ h: 24 + r0 * 8, r: 11 + r1 * 3 }); break;
       case 'blossom': made = tree({ h: 22, r: 11, blossom: true }); break;
-      case 'edgeTree': made = tree({ h: 26 + rand() * 10, r: 11 + rand() * 4, res: 2 }); break;
+      case 'edgeTree': made = tree({ h: 26 + r0 * 10, r: 11 + r1 * 4, res: 2 }); break;
       case 'bush': made = bush(); break;
       case 'bench': { const b = bench(f.pigeons || 0); made = b.obj; anims.push(b.update); break; }
       case 'bin': made = bin(); break;
@@ -500,14 +510,14 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
       case 'picnic': made = picnic(); break;
       case 'ball': made = ball(); break;
       case 'dogSit': {
-        const d = buildDog('lab', { collar: 0x3f7fd6 });
+        const d = buildDog('lab', { collar: 0x3f7fd6, loop: LOOP });
         place(d.root, f.u, f.x, yaw + 0.4);
-        anims.push((t) => { d.update(t, 0); d.neck.rotation.y = Math.sin(t * 0.6) * 0.5; });
+        anims.push((t) => { d.update(t, 0); d.neck.rotation.y = Math.sin(t * LW(0.6)) * 0.5; });
         continue;
       }
       default: continue;
     }
-    if (made) place(made, f.u, f.x, f.kind.includes('ree') || f.kind === 'blossom' ? rand() * 6 : yaw);
+    if (made) place(made, f.u, f.x, f.kind.includes('ree') || f.kind === 'blossom' ? r2 * 6 : yaw);
   }
 
   // ---- clouds (not on the planet; they drift slowly overhead)
@@ -523,10 +533,11 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
   scene.add(clouds);
 
   // ---- the chase
-  const onSphere = (obj, x, z, yaw = 0) => {
-    const y = Math.sqrt(PR * PR - x * x - z * z) - PR;
-    obj.position.set(x, y, z);
-    const n = new THREE.Vector3(x, y + PR, z).normalize();
+  // stand something on the planet: x across, s = arc length along the path (ahead = -s, like z)
+  const onSphere = (obj, x, s, yaw = 0) => {
+    const rr = Math.sqrt(PR * PR - x * x), ang = s / PR;
+    obj.position.set(x, rr * Math.cos(ang) - PR, rr * Math.sin(ang));
+    const n = new THREE.Vector3(x, rr * Math.cos(ang), rr * Math.sin(ang)).normalize();
     obj.quaternion.setFromUnitVectors(UP, n).multiply(new THREE.Quaternion().setFromAxisAngle(UP, yaw));
   };
   let kid, parent;
@@ -534,13 +545,13 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
   function setKid(look) {
     if (kid) scene.remove(kid.root);
     kidLookNow = look;
-    kid = buildBikeKid(look);
+    kid = buildBikeKid(look, { loop: LOOP, loopDist: SPEED * LOOP });
     scene.add(kid.root);
   }
   function setParent(look) {
     if (parent) scene.remove(parent.root);
     parentLookNow = look;
-    parent = buildWalker(look, { speed: SPEED, chaser: true });
+    parent = buildWalker(look, { speed: SPEED, chaser: true, loop: LOOP });
     scene.add(parent.root);
   }
   setKid(kidLook);
@@ -559,11 +570,14 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
   const leadLine = new THREE.Line(leadGeo, new THREE.LineBasicMaterial({ color: 0xc83a3a }));
   leadLine.frustumCulled = false;
   scene.add(leadLine);
+  // s(t) runs over one loop from far behind/ahead to the same distance the other side, so
+  // each one swaps ends at the loop point while it's round the back of the planet, out of sight.
+  // Lanes: westie and lab on the right (x 9..18), dog walker + sausage dog on the left.
   const MOVERS = [
-    { a: westie, x: (t) => 12 + Math.sin(t * 3) * 0.8, z: (t) => 130 - 48 * (t - 2), ground: SPEED + 48 },
-    { a: lab, x: (t) => 13 + Math.sin((t - 10) * 0.9) * 2, z: (t) => 80 - 30 * (t - 10), ground: SPEED + 30 },
-    { a: walker, x: () => -12, z: (t) => 34 + 42 * (t - 9.5), ground: 12, yaw: Math.PI },
-    { a: sausage, x: (t) => -15 + Math.sin(t * 1.3) * 0.5, z: (t) => 41 + 42 * (t - 9.5), ground: 12, yaw: Math.PI },
+    { a: westie, x: (t) => 11 + Math.sin(t * LW(3)) * 0.8, s: (t) => 480 - 48 * t, ground: SPEED + 48 },
+    { a: lab, x: (t) => 15.5 + Math.sin(t * LW(0.9)) * 0.8, s: (t) => 300 - 30 * t, ground: SPEED + 30 },
+    { a: walker, x: () => -12, s: (t) => -420 + 42 * t, ground: 42 - SPEED, yaw: Math.PI },
+    { a: sausage, x: (t) => -15.5 + Math.sin(t * LW(1.3)) * 0.4, s: (t) => -413 + 42 * t, ground: 42 - SPEED, yaw: Math.PI },
   ];
 
   // ---- lights: sunny afternoon
@@ -578,16 +592,17 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
   sun.shadow.normalBias = 0.3;
   scene.add(sun, sun.target);
 
-  const kidZ = (t) => -42 - 10 * Math.sin(t * 0.42) - 3 * Math.sin(t * 1.1);
-  const kidX = (t) => 1 + 1.5 * Math.sin(t * 0.55) + 0.5 * Math.sin(t * 1.37);
+  const kidZ = (t) => -42 - 10 * Math.sin(t * W) - 3 * Math.sin(t * 3 * W);
+  const kidX = (t) => 1 + 1.5 * Math.sin(t * 2 * W) + 0.5 * Math.sin(t * 4 * W);
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
-  function update(t) {
+  function update(time) {
+    const t = ((time % LOOP) + LOOP) % LOOP;
     planet.rotation.x = (SPEED * t) / PR;
     for (const f of anims) f(t);
-    clouds.position.z = (t * 1.5) % 40;
+    clouds.position.z = Math.sin(t * W) * 12;
 
     // the grown-up: holds station a few metres behind, surging a bit as they try to catch up
-    onSphere(parent.root, 3.5 + Math.sin(t * 0.3) * 0.6, 32 + 2.5 * Math.sin(t * 0.42 + 1));
+    onSphere(parent.root, 3.5 + Math.sin(t * W) * 0.6, 32 + 2.5 * Math.sin(t * W + 1));
     parent.update(t);
 
     // the kid: pulls away, eases off, weaves about
@@ -598,7 +613,7 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
     kid.update(t, SPEED * t - (zk - kidZ(0)));
 
     for (const m of MOVERS) {
-      onSphere(m.a.root, m.x(t), m.z(t), m.yaw || 0);
+      onSphere(m.a.root, m.x(t), m.s(t), m.yaw || 0);
       m.a.update(t, m.ground);
     }
     // the dog lead: hand to collar, with a bit of droop
@@ -622,6 +637,23 @@ export function buildPark({ kidLook = 'girl', parentLook = 'dad' } = {}) {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+// Make any rig's animation repeat every LOOP seconds, however its own timings go: blend from
+// the pose at t + LOOP to the pose at t across the loop, so the end lands on the start.
+function loopRig(rig) {
+  const nodes = [];
+  rig.root.traverse((o) => nodes.push(o));
+  const snap = nodes.map(() => ({ p: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3() }));
+  const update = rig.update;
+  rig.update = (time, ...rest) => {
+    const t = ((time % LOOP) + LOOP) % LOOP, k = t / LOOP;
+    update(t + LOOP, ...rest);
+    nodes.forEach((o, i) => { snap[i].p.copy(o.position); snap[i].q.copy(o.quaternion); snap[i].s.copy(o.scale); });
+    update(t, ...rest);
+    nodes.forEach((o, i) => { o.position.lerp(snap[i].p, 1 - k); o.quaternion.slerp(snap[i].q, 1 - k); o.scale.lerp(snap[i].s, 1 - k); });
+  };
+  return rig;
+}
 
 function skyTexture(horizon) {
   const c = document.createElement('canvas');

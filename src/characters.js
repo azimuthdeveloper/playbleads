@@ -677,10 +677,15 @@ export function buildTeacher() {
 // opts.chaser: the kid's backpack, sweat, and the odd "wait!" reach.
 // opts.lead: right hand held out for a dog lead. opts.calm: a rested face.
 const LEG = 19.8; // thigh pivot to sole
+// For seamless loops: snap an angular frequency (rad/s) or a period (s) so it repeats a whole
+// number of times in `loop` seconds. Without a loop they pass values through unchanged.
+const loopW = (loop) => (w) => (loop ? Math.max(1, Math.round(w / ((2 * Math.PI) / loop))) * ((2 * Math.PI) / loop) : w);
+const loopP = (loop) => (p) => (loop ? loop / Math.max(1, Math.round(loop / p)) : p);
 const sm = (x) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
 const bump = (x, a, b, ramp = 0.35) => sm((x - a) / ramp) * (1 - sm((x - b + ramp) / ramp)); // 0..1..0 over [a, b]
 
-export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = false, calm = false, phase = 0 } = {}) {
+export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = false, calm = false, phase = 0, loop = 0 } = {}) {
+  const lw = loopW(loop), lp = loopP(loop);
   const L = typeof look === 'object' ? look : PARENT_LOOKS[look] || PARENT_LOOKS.dad;
   const SK = L.skin ?? SKIN_BASE;
   const TOP = L.top, TOP_DARK = L.topDark;
@@ -772,7 +777,7 @@ export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = fa
     arms.push({ s, sh, elbow });
   }
 
-  const P = speed > 20 ? 1.0 : 1.35; // seconds per stride cycle (two steps)
+  const P = lp(speed > 20 ? 1.0 : 1.35); // seconds per stride cycle (two steps)
   const A = Math.asin(Math.min(0.5, (speed * P) / (4 * LEG))); // swing amplitude that covers `speed`
   const legAngle = (p) => (p < 0.5 ? A * (1 - 4 * p) : -A + 2 * A * sm((p - 0.5) * 2));
   function update(time) {
@@ -794,12 +799,12 @@ export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = fa
     hips.rotation.z = Math.cos(cyc * Math.PI * 4) * 0.02;
     torso.rotation.y = -w * 0.14;
     torso.rotation.x = (speed > 20 ? -0.17 : -0.04) + Math.cos(cyc * Math.PI * 4) * 0.015;
-    torso.scale.z = 1 + Math.sin(t * 8.5) * (chaser ? 0.025 : 0.01); // puffing
-    const reach = chaser ? bump(t % 7.5, 3.1, 4.7) : 0; // "wait for me!"
+    torso.scale.z = 1 + Math.sin(t * lw(8.5)) * (chaser ? 0.025 : 0.01); // puffing
+    const reach = chaser ? bump(t % lp(7.5), 3.1, 4.7) : 0; // "wait for me!"
     for (const { s, sh, elbow } of arms) {
       const swing = -angles[s] * 1.5;
       if (lead && s > 0) {
-        sh.rotation.x = 0.55 + Math.sin(t * 2) * 0.05;
+        sh.rotation.x = 0.55 + Math.sin(t * lw(2)) * 0.05;
         elbow.rotation.x = 0.55;
       } else if (s > 0) {
         sh.rotation.x = swing + (1.55 - swing) * reach;
@@ -811,7 +816,7 @@ export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = fa
     }
     head.rotation.y = -torso.rotation.y * 0.8 - hips.rotation.y;
     head.rotation.x = (speed > 20 ? 0.16 : 0.04) - reach * 0.12 + Math.cos(cyc * Math.PI * 4) * 0.02;
-    const closed = (t % 3.3) > 3.12;
+    const closed = (t % lp(3.3)) > lp(3.3) - 0.18;
     headOpen.visible = !closed;
     headClosed.visible = closed;
   }
@@ -822,7 +827,9 @@ export function buildWalker(look = 'dad', { speed = 30, chaser = true, lead = fa
 // ------------------------------------------------------------------ kid on a bike
 // A pedal bike with training wheels and streamers, kid in a helmet. Faces/rides toward -z,
 // root on the ground. update(t, dist): dist = ground distance travelled (drives wheels + pedals).
-export function buildBikeKid(look = 'girl') {
+// opts.loop / opts.loopDist: seconds and ground distance per loop, for a seamless loop.
+export function buildBikeKid(look = 'girl', { loop = 0, loopDist = 0 } = {}) {
+  const lw = loopW(loop), lp = loopP(loop);
   const L = { ...(typeof look === 'object' ? { ...TODDLER_LOOKS.girl, ...look } : TODDLER_LOOKS[look] || TODDLER_LOOKS.girl), grin: true };
   const SK = L.skin ?? SKIN_BASE, SKS = shadeOf(SK);
   const FRAME = L.bike, ACC = L.bikeAcc;
@@ -970,10 +977,13 @@ export function buildBikeKid(look = 'girl') {
     return { s, thigh, shin };
   });
 
+  // over one loop, turn each wheel/crank a whole number of times
+  const turns = (r) => (loop && loopDist ? (Math.max(1, Math.round(loopDist / r / (2 * Math.PI))) * 2 * Math.PI) / (loopDist / r) : 1);
+  const kW = turns(WR), kT = turns(1.7), kC = turns(WR * 1.9);
   function update(t, dist) {
-    rear.rotation.x = front.rotation.x = -dist / WR;
-    for (const p of trainers) p.rotation.x = -dist / 1.7;
-    const c = dist / (WR * 1.9);
+    rear.rotation.x = front.rotation.x = (-dist / WR) * kW;
+    for (const p of trainers) p.rotation.x = (-dist / 1.7) * kT;
+    const c = (dist / (WR * 1.9)) * kC;
     crank.rotation.x = -c;
     for (const { s, thigh, shin } of legs) {
       const py = BB.y + s * 1.8 * Math.cos(c) + 0.9, pz = BB.z - s * 1.8 * Math.sin(c) + 0.2;
@@ -985,19 +995,19 @@ export function buildBikeKid(look = 'girl') {
       thigh.rotation.x = ad + beta;
       shin.rotation.x = -(Math.PI - kappa);
     }
-    rig.rotation.z = Math.sin(t * 1.7) * 0.035 + Math.sin(t * 4.1) * 0.01;
-    rig.position.y = Math.abs(Math.sin(t * 6.3)) * 0.12; // bumpy path
+    rig.rotation.z = Math.sin(t * lw(1.7)) * 0.035 + Math.sin(t * lw(4.1)) * 0.01;
+    rig.position.y = Math.abs(Math.sin(t * lw(6.3))) * 0.12; // bumpy path
     for (const [i, p] of streamers.entries()) {
-      p.rotation.x = Math.sin(t * 17 + i) * 0.12;
-      p.rotation.y = Math.sin(t * 13 + i * 2) * 0.2;
+      p.rotation.x = Math.sin(t * lw(17) + i) * 0.12;
+      p.rotation.y = Math.sin(t * lw(13) + i * 2) * 0.2;
     }
     // glances back at the grown-up, giggling
-    const back = bump(t % 8.5, 5.0, 7.0, 0.45);
+    const back = bump(t % lp(8.5), 5.0, 7.0, 0.45);
     torso.rotation.y = -back * 0.35;
-    torso.rotation.x = -0.32 + Math.sin(t * 3) * 0.02 + back * 0.1;
-    head.rotation.y = -back * 1.15 + Math.sin(t * 0.8) * 0.08;
-    head.rotation.x = 0.28 - back * 0.1 + Math.sin(t * 9) * 0.03 * back;
-    head.rotation.z = Math.sin(t * 1.3) * 0.06;
+    torso.rotation.x = -0.32 + Math.sin(t * lw(3)) * 0.02 + back * 0.1;
+    head.rotation.y = -back * 1.15 + Math.sin(t * lw(0.8)) * 0.08;
+    head.rotation.x = 0.28 - back * 0.1 + Math.sin(t * lw(9)) * 0.03 * back;
+    head.rotation.z = Math.sin(t * lw(1.3)) * 0.06;
   }
 
   return { root, update, head };
@@ -1011,7 +1021,8 @@ const DOGS = {
 };
 
 // faces -z, root on the ground. update(t, speed): speed = ground speed, 0 = standing.
-export function buildDog(kind = 'lab', { phase = 0, collar = 0xe64545 } = {}) {
+export function buildDog(kind = 'lab', { phase = 0, collar = 0xe64545, loop = 0 } = {}) {
+  const lw = loopW(loop);
   const D = DOGS[kind] || DOGS.lab;
   const [bw, bh, bl] = D.body;
   const root = new THREE.Group();
@@ -1078,8 +1089,8 @@ export function buildDog(kind = 'lab', { phase = 0, collar = 0xe64545 } = {}) {
     const t = time + phase;
     if (speed < 1) { // standing, tail going
       for (const { p } of legs) p.rotation.x = 0;
-      bodyPivot.position.y = D.h + Math.sin(t * 2) * 0.05;
-      tail.rotation.y = Math.sin(t * 11) * 0.6;
+      bodyPivot.position.y = D.h + Math.sin(t * lw(2)) * 0.05;
+      tail.rotation.y = Math.sin(t * lw(11)) * 0.6;
       tail.rotation.x = -0.3;
       return;
     }

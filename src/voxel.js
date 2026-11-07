@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 // Deterministic RNG so the per-voxel colour jitter is identical every run.
 let seed = 1337;
+// reset the sequence, so the same build code makes the same voxels again
+export function setSeed(s) { seed = s; }
 export function rand() {
   seed = (seed * 16807) % 2147483647;
   return (seed - 1) / 2147483646;
