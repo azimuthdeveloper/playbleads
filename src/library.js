@@ -32,7 +32,7 @@ const KIDS = [
   { a: 150, look: { skin: 0xc68642, hair: 0x2a1a12, tee: [0x3fd0ff], legs: [0xf2c94c, 0xe6bd40], style: 'bun', bow: 0xff7a5c, mode: 'block', blockColor: 0x55b86a, phase: 2.8, brows: 0x2a1a12 } },
 ];
 
-export function buildLibrary({ kidLook = 'girl', parentLook = 'tired' } = {}) {
+export function buildLibrary({ kidLook = 'girl', parentLook = 'tired', loop = 0 } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf3ead8);
   scene.fog = new THREE.Fog(0xf3ead8, 120, 240);
@@ -42,13 +42,13 @@ export function buildLibrary({ kidLook = 'girl', parentLook = 'tired' } = {}) {
   buildRoom(room);
 
   // ---------- people ----------
-  const teacher = buildTeacher();
+  const teacher = buildTeacher({ loop });
   teacher.root.position.copy(TEACHER_POS);
   teacher.root.rotation.y = Math.PI; // faces the kids
   scene.add(teacher.root);
 
   const kids = KIDS.map(({ a, look }) => {
-    const k = buildToddler(look);
+    const k = buildToddler(look, { loop });
     const p = onCircle(a);
     k.root.position.copy(p);
     k.root.rotation.y = faceYaw(p, TEACHER_POS);
@@ -60,7 +60,7 @@ export function buildLibrary({ kidLook = 'girl', parentLook = 'tired' } = {}) {
   let ourKid, parent;
   function setKid(look) {
     if (ourKid) scene.remove(ourKid.root);
-    ourKid = buildToddler(look);
+    ourKid = buildToddler(look, { loop });
     const p = onCircle(OUR_KID_ANGLE);
     ourKid.root.position.copy(p);
     ourKid.root.rotation.y = faceYaw(p, TEACHER_POS);
@@ -68,7 +68,7 @@ export function buildLibrary({ kidLook = 'girl', parentLook = 'tired' } = {}) {
   }
   function setParent(look) {
     if (parent) scene.remove(parent.root);
-    parent = buildParent(look, 'chair');
+    parent = buildParent(look, 'chair', { loop });
     parent.root.position.copy(PARENT_POS);
     // watching their kid (and the story) from just outside the circle
     parent.root.rotation.y = faceYaw(PARENT_POS, onCircle(OUR_KID_ANGLE - 25, 6));

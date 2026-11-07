@@ -8,7 +8,10 @@ const PINK = '#ff3fa4', SKY = '#3fd0ff', YEL = '#ffe23f', GRN = '#4cff6a',
   ORA = '#ff8a1f', PUR = '#a64dff', RED = '#ff3b3b', WHITE = '#ffffff', INK = '#1a1030';
 const SEG = 3; // seconds per segment
 
-export function createTVShow() {
+// `loop` (s): the show runs a whole number of times per loop, and its always-on bits (the logo)
+// repeat a whole number of times too, so the last frame runs into the first.
+export function createTVShow({ loop = 0 } = {}) {
+  const lw = (w) => (loop ? Math.max(1, Math.round(w / ((2 * Math.PI) / loop))) * ((2 * Math.PI) / loop) : w);
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -52,7 +55,7 @@ export function createTVShow() {
 
   function logo(t) {
     // watermelon-slice badge + show name, bottom-left, always on screen
-    const bob = Math.round(Math.sin(t * 6));
+    const bob = Math.round(Math.sin(t * lw(6)));
     rect(2, 44 + bob, 13, 1, '#2bb34a');
     for (let i = 0; i < 6; i++) rect(2 + i, 43 - i + bob, 13 - i * 2, 1, i === 0 ? '#9fef7a' : RED);
     rect(6, 41 + bob, 1, 1, INK); rect(9, 42 + bob, 1, 1, INK);
@@ -175,7 +178,9 @@ export function createTVShow() {
 
   const segs = [babySeg, fruitSeg, rainbowSeg, countSeg];
 
-  function update(t) {
+  function update(time) {
+    // looping: start half a segment in, so the loop point never lands on a cut's white flash
+    const t = loop ? (((time + SEG / 2) % loop) + loop) % loop : time;
     const idx = Math.floor(t / SEG) % segs.length;
     const local = t % SEG;
     segs[idx](local);

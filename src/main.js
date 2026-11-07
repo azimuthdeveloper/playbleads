@@ -7,7 +7,24 @@ import { createTVShow } from './tvshow.js';
 import { SCENES, applyCamera } from './scenes.js';
 import { startRecording } from './recorder.js';
 
-const WIDTH = 1920, HEIGHT = 1080;
+// Output formats. Shots are framed for 16:9; taller frames widen the view to keep the action in.
+export const FORMATS = {
+  landscape: { label: '16:9 · 1920×1080', w: 1920, h: 1080 },
+  reel: { label: 'Instagram Reel · 9:16', w: 1080, h: 1920, ig: true },
+  feed: { label: 'Instagram post · 4:5', w: 1080, h: 1350, ig: true },
+  square: { label: 'Instagram square · 1:1', w: 1080, h: 1080, ig: true },
+};
+const params = new URLSearchParams(location.search);
+let format = FORMATS[params.get('format')] ? params.get('format') : 'landscape';
+let WIDTH = FORMATS[format].w, HEIGHT = FORMATS[format].h;
+
+// each world loops over the length of the scenes shot in it (they must agree)
+const loopOf = (world) => {
+  const ds = [...new Set(SCENES.filter((s) => (s.world || 'home') === world).map((s) => s.duration))];
+  if (ds.length > 1) console.warn(`scenes in "${world}" have different lengths (${ds}); loops won't be seamless`);
+  return ds[0] || 0;
+};
+const HOME_LOOP = loopOf('home'), LIBRARY_LOOP = loopOf('library');
 
 // ---------- renderer ----------
 const canvas = document.getElementById('view');
@@ -26,32 +43,41 @@ scene.fog = new THREE.Fog(0x101019, 90, 190);
 
 const camera = new THREE.PerspectiveCamera(45, WIDTH / HEIGHT, 0.5, 400);
 
+function setFormat(key) {
+  format = key;
+  ({ w: WIDTH, h: HEIGHT } = FORMATS[key]);
+  renderer.setSize(WIDTH, HEIGHT, false);
+  canvas.style.aspectRatio = `${WIDTH} / ${HEIGHT}`;
+  camera.aspect = WIDTH / HEIGHT;
+  camera.userData.zoomOut = Math.sqrt(Math.max(1, (16 / 9) / camera.aspect));
+}
+setFormat(format);
+
 // ---------- world ----------
 const { screen } = buildRoom(scene);
-const show = createTVShow();
+const show = createTVShow({ loop: HOME_LOOP });
 screen.material.map = show.texture;
 screen.material.needsUpdate = true;
 
-const params = new URLSearchParams(location.search);
 let toddler, parent;
 let kidLook, parentLook;
 function setToddler(look) {
   kidLook = look;
   if (toddler) { scene.remove(toddler.root); library.setKid(look); park?.setKid(look); } // same kid in every world
-  toddler = buildToddler(look);
+  toddler = buildToddler(look, { loop: HOME_LOOP });
   toddler.root.position.set(2, 0, -6);
   scene.add(toddler.root);
 }
 function setParent(look) {
   parentLook = look;
   if (parent) { scene.remove(parent.root); library.setParent(look); }
-  parent = buildParent(look);
+  parent = buildParent(look, 'couch', { loop: HOME_LOOP });
   parent.root.position.set(0, 11, 13);
   scene.add(parent.root);
 }
 const startParent = PARENT_LOOKS[params.get('parent')] ? params.get('parent') : 'tired';
 const startKid = TODDLER_LOOKS[params.get('kid')] ? params.get('kid') : 'girl';
-const library = buildLibrary({ kidLook: startKid, parentLook: startParent });
+const library = buildLibrary({ kidLook: startKid, parentLook: startParent, loop: LIBRARY_LOOP });
 // the park has its own grown-up (a dad by default; ?walker=mum etc.), built on first use
 let park = null;
 let walkerLook = PARENT_LOOKS[params.get('walker')] ? params.get('walker') : 'dad';
@@ -134,6 +160,7 @@ const ui = {
   status: document.getElementById('status'),
   parentPick: document.getElementById('parentPick'),
   kidPick: document.getElementById('kidPick'),
+  formatPick: document.getElementById('formatPick'),
 };
 
 function fillPicker(sel, looks, current, onPick) {
@@ -144,6 +171,7 @@ fillPicker(ui.parentPick, PARENT_LOOKS, startParent, (look) => {
   if (inPark()) { walkerLook = look; park?.setParent(look); } else setParent(look);
 });
 fillPicker(ui.kidPick, TODDLER_LOOKS, startKid, setToddler);
+fillPicker(ui.formatPick, FORMATS, format, setFormat);
 
 function setScene(i) {
   sceneIdx = i;
@@ -164,7 +192,10 @@ async function recordScene(i) {
   ui.play.textContent = 'Pause';
   ui.status.textContent = `● Recording scene ${i + 1}…`;
   document.body.classList.add('recording');
-  recording = startRecording(canvas, `scene-${i + 1}-${SCENES[i].name.toLowerCase().replace(/[^a-z]+/g, '-')}`);
+  const slug = SCENES[i].name.toLowerCase().replace(/[^a-z]+/g, '-');
+  const F = FORMATS[format];
+  // Instagram only takes MP4 (H.264), so prefer it for those formats
+  recording = startRecording(canvas, `scene-${i + 1}-${slug}${format === 'landscape' ? '' : `-${format}`}`, { preferMp4: F.ig });
   t = 0;
   last = performance.now();
   await new Promise((resolve) => (recording.onEnd = resolve));
@@ -196,9 +227,14 @@ function loop(now) {
   last = now;
   const dur = SCENES[sceneIdx].duration;
   if (playing) t += dt;
+  if (recording?.ended) { requestAnimationFrame(loop); return; } // hold while the file is written
   if (recording && t >= dur) {
-    t = dur;
+    // stop on the last frame before the loop point: frame `dur` is frame 0 again, and a
+    // repeated frame would show as a hitch when the video loops
+    recording.ended = true;
     recording.onEnd?.();
+    requestAnimationFrame(loop);
+    return;
   } else if (!recording && t > dur) {
     t = 0; // loop previews
   }
@@ -214,11 +250,11 @@ if (!playing) ui.play.textContent = 'Play';
 requestAnimationFrame(loop);
 
 // debugging hook
-window.__voxel = { setScene, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); } };
+window.__voxel = { setScene, setFormat, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); } };
 
 // ?sheet: render every scene x 4 moments into one image (cheap visual check)
 if (params.has('sheet')) {
-  const cols = 4, w = 480, h = 270;
+  const cols = 4, h = 270, w = Math.round((h * WIDTH) / HEIGHT);
   const sheet = document.createElement('canvas');
   sheet.width = cols * w; sheet.height = SCENES.length * h;
   const g = sheet.getContext('2d');
