@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LOOP } from './park.js';
+import { TRAIN_LOOP, trainCamera } from './train.js';
 
 // Camera scripts. Each key: pos, look, fov.
 // Every scene loops seamlessly: positions/targets/fov are joined with closed Catmull-Rom
@@ -65,6 +66,16 @@ export const SCENES = [
     duration: LOOP,
     camera: parkOrbit,
   },
+  {
+    // the $1 day trip: close on a kid at a train window, pull back to the whole train, then
+    // up overhead as it crosses a river bridge past the words. Fades in and out of black.
+    name: '$1 day trip',
+    world: 'train',
+    duration: TRAIN_LOOP,
+    camera: trainCamera,
+    fade: { in: 1.2, out: 1.4 },
+    far: 2600, // it pulls a long way back
+  },
 ];
 
 // when each key is reached (s), plus the scene length at the end for the way back to key 0
@@ -106,6 +117,7 @@ function setFov(camera, fov) {
 
 export function applyCamera(camera, sceneIdx, t) {
   const s = SCENES[sceneIdx];
+  camera.far = s.far ?? 400;
   if (s.camera) return s.camera(camera, t);
   const D = s.duration;
   const c = curves[sceneIdx], st = c.starts;

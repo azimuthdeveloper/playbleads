@@ -3,6 +3,7 @@ import { buildRoom, TV_SCREEN } from './room.js';
 import { buildToddler, buildParent, TODDLER_LOOKS, PARENT_LOOKS } from './characters.js';
 import { buildLibrary } from './library.js';
 import { buildPark } from './park.js';
+import { buildTrain } from './train.js';
 import { createTVShow } from './tvshow.js';
 import { SCENES, applyCamera } from './scenes.js';
 import { startRecording } from './recorder.js';
@@ -50,7 +51,9 @@ function setFormat(key) {
   canvas.style.aspectRatio = `${WIDTH} / ${HEIGHT}`;
   camera.aspect = WIDTH / HEIGHT;
   camera.userData.zoomOut = Math.sqrt(Math.max(1, (16 / 9) / camera.aspect));
+  train?.setAspect(camera.aspect); // the words re-flow for tall frames
 }
+let train = null;
 setFormat(format);
 
 // ---------- world ----------
@@ -63,14 +66,14 @@ let toddler, parent;
 let kidLook, parentLook;
 function setToddler(look) {
   kidLook = look;
-  if (toddler) { scene.remove(toddler.root); library.setKid(look); park?.setKid(look); } // same kid in every world
+  if (toddler) { scene.remove(toddler.root); library.setKid(look); park?.setKid(look); train?.setKid(look); } // same kid in every world
   toddler = buildToddler(look, { loop: HOME_LOOP });
   toddler.root.position.set(2, 0, -6);
   scene.add(toddler.root);
 }
 function setParent(look) {
   parentLook = look;
-  if (parent) { scene.remove(parent.root); library.setParent(look); }
+  if (parent) { scene.remove(parent.root); library.setParent(look); train?.setParent(look); }
   parent = buildParent(look, 'couch', { loop: HOME_LOOP });
   parent.root.position.set(0, 11, 13);
   scene.add(parent.root);
@@ -82,6 +85,7 @@ const library = buildLibrary({ kidLook: startKid, parentLook: startParent, loop:
 let park = null;
 let walkerLook = PARENT_LOOKS[params.get('walker')] ? params.get('walker') : 'dad';
 const getPark = () => (park ??= buildPark({ kidLook, parentLook: walkerLook }));
+const getTrain = () => (train ??= buildTrain({ kidLook, parentLook, aspect: camera.aspect }));
 setToddler(startKid);
 setParent(startParent);
 
@@ -140,6 +144,7 @@ const worlds = {
   },
   library,
   get park() { return getPark(); },
+  get train() { return getTrain(); },
 };
 const inPark = () => SCENES[sceneIdx].world === 'park';
 
@@ -220,7 +225,20 @@ function renderFrame() {
   world.update(t);
   renderer.toneMappingExposure = world.exposure;
   renderer.render(world.scene, camera);
+  // fades to/from black (drawn into the canvas, so they're in the recording too)
+  const fd = SCENES[sceneIdx].fade, D = SCENES[sceneIdx].duration;
+  const black = fd ? Math.max(1 - t / fd.in, (t - (D - fd.out)) / fd.out, 0) : 0;
+  if (black > 0) {
+    fadeMat.opacity = Math.min(1, black);
+    renderer.autoClear = false;
+    renderer.render(fadeScene, fadeCam);
+    renderer.autoClear = true;
+  }
 }
+const fadeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false, depthWrite: false });
+const fadeScene = new THREE.Scene();
+fadeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), fadeMat).translateZ(-0.5));
+const fadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
 function loop(now) {
   const dt = Math.max(0, Math.min(0.1, (now - last) / 1000));
@@ -250,7 +268,7 @@ if (!playing) ui.play.textContent = 'Play';
 requestAnimationFrame(loop);
 
 // debugging hook
-window.__voxel = { setScene, setFormat, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); } };
+window.__voxel = { setScene, setFormat, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); }, get train() { return getTrain(); } };
 
 // ?sheet: render every scene x 4 moments into one image (cheap visual check)
 if (params.has('sheet')) {
