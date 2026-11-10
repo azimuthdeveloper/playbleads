@@ -133,6 +133,22 @@ export function buildToddler(look = 'girl', { loop = 0 } = {}) {
     root.rotation.z = Math.sin(t * lw(1.3)) * 0.03;
     head.rotation.x = (L.lookUp ?? 0.22) + Math.sin(t * lw(2.6)) * 0.03;
     head.rotation.y = Math.sin(t * lw(0.7)) * 0.05;
+    if (mode === 'window') {
+      // kneeling up on a train seat, nose to the glass, hands either side of the face,
+      // watching the world go by, with the odd excited bounce and a tap on the window
+      const look = Math.sin(t * lw(0.9)) * 0.2 + Math.sin(t * lw(2.1)) * 0.06;
+      head.rotation.set(0.02 + Math.sin(t * lw(1.7)) * 0.03, look, Math.sin(t * lw(0.6)) * 0.07);
+      root.rotation.x = -0.12;
+      const bounce = Math.max(0, Math.sin(t * lw(1.25))) ** 8;
+      root.position.y = Math.abs(Math.sin(t * lw(9))) * bounce * 0.5;
+      const tap = Math.max(0, Math.sin(t * lw(0.8) + 1)) ** 10 * Math.abs(Math.sin(t * lw(11)));
+      for (const arm of arms) {
+        const s = arm.userData.side;
+        arm.rotation.x = 2.35 + (s > 0 ? tap * 0.2 : 0);
+        arm.rotation.z = s * 0.12;
+      }
+      return;
+    }
     const beat = (((t % BEAT) + BEAT) % BEAT) * (5 / BEAT); // a 5 s routine, stretched to fit the loop
     const clapping = mode === 'clap' && beat > 2.5 && beat < 3.7;
     for (const arm of arms) {
@@ -317,10 +333,11 @@ function makeParentHead(L, closed, chair, calm = false) {
 }
 
 // pose 'couch': slumped in front of the TV. pose 'chair': sitting up at playgroup with a
-// takeaway coffee, still exhausted but happy.
-export function buildParent(look = 'tired', pose = 'couch', { loop = 0 } = {}) {
+// takeaway coffee, still exhausted but happy. `look` is a PARENT_LOOKS key, or an object
+// overriding the tired look (it should bring its own topFn). `calm` gives a well-rested face.
+export function buildParent(look = 'tired', pose = 'couch', { loop = 0, calm = false } = {}) {
   const lw = loopW(loop), lp = loopP(loop);
-  const L = PARENT_LOOKS[look] || PARENT_LOOKS.tired;
+  const L = typeof look === 'object' ? { ...PARENT_LOOKS.tired, ...look } : PARENT_LOOKS[look] || PARENT_LOOKS.tired;
   const chair = pose === 'chair';
   const root = new THREE.Group(); // hip pivot
   root.name = 'parent';
@@ -364,7 +381,7 @@ export function buildParent(look = 'tired', pose = 'couch', { loop = 0 } = {}) {
   const head = pivot(torso, 0, 12, 0);
   head.rotation.x = chair ? -0.2 : 0.42;
   head.rotation.z = chair ? 0.06 : 0.14;
-  const headOpen = makeParentHead(L, false, chair), headClosed = makeParentHead(L, true, chair);
+  const headOpen = makeParentHead(L, false, chair, calm), headClosed = makeParentHead(L, true, chair, calm);
   head.add(headOpen, headClosed);
   headClosed.visible = false;
 
