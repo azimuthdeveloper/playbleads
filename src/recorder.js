@@ -1,4 +1,24 @@
 // Records the WebGL canvas to a video file using MediaRecorder.
+import { defragmentMp4, addWebmDuration } from './fixduration.js';
+
+// MediaRecorder's files report a ~0s duration in their header (Facebook then shows
+// the video as about a second long). Rewrite them so the header has the real length.
+async function withDuration(blob, ms) {
+  try {
+    const b = new Uint8Array(await blob.arrayBuffer());
+    if (blob.type.includes('mp4')) {
+      const r = defragmentMp4(b);
+      if (r) return new Blob([r.head, ...r.chunks.map(([s, e]) => blob.slice(s, e))], { type: 'video/mp4' });
+    } else {
+      const r = addWebmDuration(b, ms);
+      if (r) return new Blob([r.head, blob.slice(r.rest)], { type: 'video/webm' });
+    }
+    console.warn('Could not fix the video duration header; saving the file as recorded.');
+  } catch (err) {
+    console.warn('Could not fix the video duration header; saving the file as recorded.', err);
+  }
+  return blob;
+}
 export function pickMime({ preferMp4 = false } = {}) {
   const mp4 = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4'];
   const types = [
@@ -20,9 +40,9 @@ export function startRecording(canvas, filename, { fps = 60, preferMp4 = false }
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   const done = new Promise((resolve) => {
-    rec.onstop = () => {
+    rec.onstop = async () => {
       const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-      const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+      const blob = await withDuration(new Blob(chunks, { type: mimeType || 'video/webm' }), performance.now() - startedAt);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -35,6 +55,8 @@ export function startRecording(canvas, filename, { fps = 60, preferMp4 = false }
       resolve(blob);
     };
   });
+  let startedAt = performance.now();
+  rec.onstart = () => (startedAt = performance.now());
   rec.start(250);
   return { stop: () => rec.state !== 'inactive' && rec.stop(), done };
 }
