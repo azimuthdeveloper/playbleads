@@ -3,6 +3,7 @@ import { buildRoom, TV_SCREEN } from './room.js';
 import { buildToddler, buildParent, TODDLER_LOOKS, PARENT_LOOKS } from './characters.js';
 import { buildLibrary } from './library.js';
 import { buildPark } from './park.js';
+import { buildCorner } from './corner.js';
 import { buildTrain } from './train.js';
 import { createTVShow } from './tvshow.js';
 import { SCENES, applyCamera } from './scenes.js';
@@ -25,7 +26,7 @@ const loopOf = (world) => {
   if (ds.length > 1) console.warn(`scenes in "${world}" have different lengths (${ds}); loops won't be seamless`);
   return ds[0] || 0;
 };
-const HOME_LOOP = loopOf('home'), LIBRARY_LOOP = loopOf('library');
+const HOME_LOOP = loopOf('home'), LIBRARY_LOOP = loopOf('library'), CORNER_LOOP = loopOf('corner');
 
 // ---------- renderer ----------
 const canvas = document.getElementById('view');
@@ -66,14 +67,14 @@ let toddler, parent;
 let kidLook, parentLook;
 function setToddler(look) {
   kidLook = look;
-  if (toddler) { scene.remove(toddler.root); library.setKid(look); park?.setKid(look); train?.setKid(look); } // same kid in every world
+  if (toddler) { scene.remove(toddler.root); library.setKid(look); park?.setKid(look); corner?.setKid(look); train?.setKid(look); } // same kid in every world
   toddler = buildToddler(look, { loop: HOME_LOOP });
   toddler.root.position.set(2, 0, -6);
   scene.add(toddler.root);
 }
 function setParent(look) {
   parentLook = look;
-  if (parent) { scene.remove(parent.root); library.setParent(look); train?.setParent(look); }
+  if (parent) { scene.remove(parent.root); library.setParent(look); corner?.setParent(look); train?.setParent(look); }
   parent = buildParent(look, 'couch', { loop: HOME_LOOP });
   parent.root.position.set(0, 11, 13);
   scene.add(parent.root);
@@ -85,6 +86,9 @@ const library = buildLibrary({ kidLook: startKid, parentLook: startParent, loop:
 let park = null;
 let walkerLook = PARENT_LOOKS[params.get('walker')] ? params.get('walker') : 'dad';
 const getPark = () => (park ??= buildPark({ kidLook, parentLook: walkerLook }));
+// outside The Corner at the State Library, built on first use
+let corner = null;
+const getCorner = () => (corner ??= buildCorner({ kidLook, parentLook, loop: CORNER_LOOP }));
 const getTrain = () => (train ??= buildTrain({ kidLook, parentLook, aspect: camera.aspect }));
 setToddler(startKid);
 setParent(startParent);
@@ -144,6 +148,7 @@ const worlds = {
   },
   library,
   get park() { return getPark(); },
+  get corner() { return getCorner(); },
   get train() { return getTrain(); },
 };
 const inPark = () => SCENES[sceneIdx].world === 'park';
@@ -268,7 +273,7 @@ if (!playing) ui.play.textContent = 'Play';
 requestAnimationFrame(loop);
 
 // debugging hook
-window.__voxel = { setScene, setFormat, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); }, get train() { return getTrain(); } };
+window.__voxel = { setScene, setFormat, setParent, setToddler, setTime: (v) => { t = v; playing = false; }, renderAt: (v) => { t = v; playing = false; renderFrame(); }, renderer, scene, camera, library, get park() { return getPark(); }, get corner() { return getCorner(); }, get train() { return getTrain(); } };
 
 // ?sheet: render every scene x 4 moments into one image (cheap visual check)
 if (params.has('sheet')) {
